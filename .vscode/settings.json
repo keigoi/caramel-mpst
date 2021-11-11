@@ -1,0 +1,11 @@
+{
+    "emeraldwalk.runonsave": {
+        "commands": [
+            {
+                "match": "\\.\(rei?|mli?\)$",
+                "isAsync": true,
+                "cmd": "cd `dirname ${file}`; caramel compile ${file} >> /tmp/caramel.log 2>&1"
+            }
+        ]
+    }
+}

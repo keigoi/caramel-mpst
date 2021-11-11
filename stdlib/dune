@@ -1,0 +1,7 @@
+(library
+ (name beam)
+ (modes byte)
+ (libraries stdlib)
+ )
+
+(env (dev (flags (:standard -w -32))))

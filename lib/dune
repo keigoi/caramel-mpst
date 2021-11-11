@@ -1,0 +1,8 @@
+(library
+ (name caramel_mpst)
+ (modes byte)
+ (libraries beam stdlib))
+
+(env
+  (dev
+    (flags (:standard  -w -61 -open Beam -nostdlib))))
