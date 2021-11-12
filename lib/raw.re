@@ -1,12 +1,12 @@
 // external make_variant: (Transport.variant_tag, 't) => 'var = "make_variant";
 
-external fail: 'variant => 'a = "fail";
+external fail: unit => 'a = "fail";
 
 external dontknow: unit => 'a = "dontknow";
 
 external assertfalse: unit => 'a = "assertfalse";
 
-external todo: 'variant => 'a = "todo";
+external todo: unit => 'a = "todo";
 
 external guarded_receive: (~guard: 'a => bool) => 'a = "guarded_receive";
 
