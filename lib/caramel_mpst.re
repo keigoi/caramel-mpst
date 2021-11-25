@@ -1,16 +1,6 @@
 type session('a) = {
-  dummy_witness: 'a,
   mpchan: Transport.mpchan,
-};
-
-// 多相ヴァリアントのコンストラクタ. open_variant([> `Bob('v)], 'v)
-type open_variant('var, 'v) = 'v => 'var;
-
-type closed_variant('var, 'v) = 'var => 'v;
-
-type disj('lr, 'l, 'r) = {
-  concat: (list('l), list('r)) => list('lr),
-  split: list('lr) => (list('l), list('r)),
+  dummy_witness: 'a,
 };
 
 type global('a, 'b, 'c) = (session('a), session('b), session('c));
@@ -31,6 +21,18 @@ let lens_b = () => {
 let lens_c = () => {
   get: ((_, _, c)) => c,
   put: ((a, b, _), c) => (a, b, c),
+};
+
+// 多相ヴァリアントのコンストラクタ. open_variant([> `Bob('v)], 'v)
+// [`Bob; `Carol; `Alice] <<-- list([> `Alice | `Bob | `Carol])
+type open_variant('var, 'v) = 'v => 'var;
+
+// (fun | `Bob(v) => v | `Alice(v) => v) : [< `Bob('v) | `Alice('v)] => 'v
+type closed_variant('var, 'v) = 'var => 'v;
+
+type disj('lr, 'l, 'r) = {
+  concat: (list('l), list('r)) => list('lr),
+  split: list('lr) => (list('l), list('r)),
 };
 
 type role('a, 'b, 's, 't, 'obj, 'v) = {
@@ -113,6 +115,7 @@ let to_bob = disj => {
   },
 };
 
+// (x => `Bob(x))  を Erlang のアトム bob に変換する
 let open_variant_to_tag: 'var. open_variant('var, _) => Polyvar.tag =
   var => {
     let (roletag, _) = Raw.destruct_polyvar(var(Raw.dontknow()));
@@ -129,9 +132,13 @@ let send:
   ) =>
   session('c)
  =
+  // payload
+  // x => `hello(x)
+  // x => `Bob(x)
+  // mpchan のところに pid の一覧が入っている
   (sess, role, label, v) => {
-    let roletag = open_variant_to_tag(role);
-    let labeltag = open_variant_to_tag(label);
+    let roletag /* アトムbob */ = open_variant_to_tag(role);
+    let labeltag /* hello */ = open_variant_to_tag(label);
     Transport.raw_send(sess.mpchan, roletag, labeltag, v);
     {mpchan: sess.mpchan, dummy_witness: Raw.dontknow()};
   };
@@ -160,7 +167,19 @@ let (-->):
   ) =>
   'cur
  =
-  (_from, _to, _label, _next) => Raw.dontknow();
+  (_from, _to, _label, _next) =>
+    /*
+     (alice --> bob)(hello, next)
+     next : global('a, 'b, 'c)
+     これがほしい: global([`Bob(out([`hello(session('a))]))], [`Alice(inp([`hello(session('b))]))], 'c)
+     let bob_next = bob.role_lens.get(next);
+     let bob_now = alice.role_label(hello.label_open(bob_next));
+     let next = bob.role_lens.put(next, bob_now);
+     let alice_next = alice.role_lens.get(next);
+     let alice_now = bob.role_label(hello.label_close(alice_next));
+     alice.role_lens.put(next,alice_now)
+      */
+    Raw.dontknow();
 
 let finish: unit => global(unit, unit, unit) = () => Raw.dontknow();
 
@@ -181,7 +200,14 @@ let choice_at:
   ) =>
   'cur
  =
-  (_alice, _disj, (_alice1, _left), (_alice2, _right)) => Raw.dontknow();
+  (_alice, _disj, (_alice1, _left), (_alice2, _right)) =>
+    /*
+      choice(alice)(disj)(alice, (alice --> bob)(hello, left),
+                          alice, (alice --> bob)(goodbye, right))
+      let
+
+     */
+    Raw.dontknow();
 
 let extract:
   'a 'b 'c.
@@ -191,7 +217,10 @@ let extract:
   ) =>
   session('t)
  =
-  (_g, _role) => Raw.todo();
+  (_g, _role) => {
+    Raw.todo();
+            // {mpchan: /* ここに入れる */, dummy_witness: Raw.dontknow()}
+  };
 
 // Example
 
@@ -209,28 +238,28 @@ let g = () =>
     (alice, (alice --> bob)(goodbye, (bob --> carol)(goodbye, finish))),
   );
 
-let a = () => {
-  let ch = extract(g(), alice);
-  let ch1 = send(ch, x => `Bob(x), x => `hello(x), 123);
-  switch (receive(ch1, x => `Carol(x))) {
-  | `hello(_v, ch2) => close(ch2)
+let a = ch =>
+  if (true) {
+    let ch1 = send(ch, x => `Bob(x), x => `hello(x), 123);
+    switch (receive(ch1, x => `Carol(x))) {
+    | `hello(_v, ch2) => close(ch2)
+    };
+  } else {
+    let ch1 = send(ch, x => `Bob(x), x => `goodbye(x), 123);
+    close(ch1);
   };
-  ();
-};
 
-let b = () => {
-  let ch = extract(g(), bob);
+let b = ch => {
   let ch3 =
     switch (receive(ch, x => `Alice(x))) {
-    | `hello(_v, ch2) => send(ch2, x => `Carol(x), x => `hello(x), 123)
+    | `hello(v, ch2) => send(ch2, x => `Carol(x), x => `hello(x), v + 123)
     | `goodbye(_v, ch2) =>
       send(ch2, x => `Carol(x), x => `goodbye(x), "foo")
     };
   close(ch3);
 };
 
-let c = () => {
-  let ch = extract(g(), carol);
+let c = ch => {
   let ch3 =
     switch (receive(ch, x => `Bob(x))) {
     | `hello(_v, ch2) => send(ch2, x => `Alice(x), x => `hello(x), 123)
@@ -238,3 +267,64 @@ let c = () => {
     };
   close(ch3);
 };
+
+let from_some = opt => {
+  switch (opt) {
+  | Some(v) => v
+  | None => Raw.fail()
+  };
+};
+
+let start = (_g: global(_, _, _), fa, fb, fc) => {
+  let pid_a =
+    Process.make((_, recv) => {
+      let ch_a = from_some(recv(~timeout=Process.Infinity));
+      (fa(ch_a): unit);
+    });
+  let pid_b =
+    Process.make((_, recv) => {
+      let ch_b = from_some(recv(~timeout=Process.Infinity));
+      (fb(ch_b): unit);
+    });
+  let pid_c =
+    Process.make((_, recv) => {
+      let ch_c = from_some(recv(~timeout=Process.Infinity));
+      (fc(ch_c): unit);
+    });
+  let ch_a: session(_) =
+    /* ここで `alice->pid_a, `bob->pid_b, `carol->pid_c の Map を作る */ Raw.dontknow();
+  let ch_b: session(_) =
+    /* ここで `alice->pid_a, `bob->pid_b, `carol->pid_c の Map を作る */ Raw.dontknow();
+  let ch_c: session(_) =
+    /* ここで `alice->pid_a, `bob->pid_b, `carol->pid_c の Map を作る */ Raw.dontknow();
+  Process.send(pid_a, ch_a);
+  Process.send(pid_b, ch_b);
+  Process.send(pid_c, ch_c);
+  ();
+};
+
+let () = {
+  start(
+    (alice --> bob)(hello, finish, ()),
+    ch => {
+      // Alice
+      let ch' = send(ch, x => `Bob(x), x => `hello(x), 123);
+      close(ch');
+    },
+    ch => {
+      // Bob
+      let `hello(_v, ch') = receive(ch, x => `Alice(x));
+      close(ch');
+    },
+    ch => {
+      // Carol
+      close(ch)
+    },
+  );
+};
+
+// let f = () => {
+//   let x = 1;
+//   let x = 2;
+//   ()
+// }

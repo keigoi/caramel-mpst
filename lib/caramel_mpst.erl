@@ -12,16 +12,17 @@
 -export_type([session/1]).
 
 -export(['-->'/4]).
--export([a/0]).
+-export([a/1]).
 -export([alice/0]).
--export([b/0]).
+-export([b/1]).
 -export([bob/0]).
--export([c/0]).
+-export([c/1]).
 -export([carol/0]).
 -export([choice_at/4]).
 -export([close/1]).
 -export([extract/2]).
 -export([finish/0]).
+-export([from_some/1]).
 -export([g/1]).
 -export([goodbye/0]).
 -export([hello/0]).
@@ -33,11 +34,18 @@
 -export([open_variant_to_tag/1]).
 -export([receive/2]).
 -export([send/4]).
+-export([start/4]).
 -export([to_bob/1]).
 
--type session(A) :: #{ dummy_witness => A
-                     , mpchan => transport:mpchan()
+-type session(A) :: #{ mpchan => transport:mpchan()
+                     , dummy_witness => A
                      }.
+
+-type global(A, B, C) :: {session(A), session(B), session(C)}.
+
+-type lens(A, B, S, T) :: #{ get => fun((S) -> session(A))
+                           , put => fun((S, session(B)) -> T)
+                           }.
 
 -type open_variant(Var, V) :: fun((V) -> Var).
 
@@ -46,12 +54,6 @@
 -type disj(Lr, L, R) :: #{ concat => fun((list(L), list(R)) -> list(Lr))
                          , split => fun((list(Lr)) -> {list(L), list(R)})
                          }.
-
--type global(A, B, C) :: {session(A), session(B), session(C)}.
-
--type lens(A, B, S, T) :: #{ get => fun((S) -> session(A))
-                           , put => fun((S, session(B)) -> T)
-                           }.
 
 -type role(A, B, S, T, Obj, V) :: #{ role_label => closed_variant(Obj, V)
                                    , role_lens => lens(A, B, S, T)
@@ -211,8 +213,8 @@ send(Sess, Role, Label, V) ->
   Labeltag = open_variant_to_tag(Label),
   begin
     transport:raw_send(maps:get(mpchan, Sess), Roletag, Labeltag, V),
-    #{ dummy_witness => raw:dontknow()
-     , mpchan => maps:get(mpchan, Sess)
+    #{ mpchan => maps:get(mpchan, Sess)
+     , dummy_witness => raw:dontknow()
      }
   end.
 
@@ -220,8 +222,8 @@ send(Sess, Role, Label, V) ->
 receive(Sess, Role) ->
   Roletag = open_variant_to_tag(Role),
   {Labeltag, V} = transport:raw_receive(Roletag),
-  Cont = #{ dummy_witness => raw:dontknow()
-   , mpchan => maps:get(mpchan, Sess)
+  Cont = #{ mpchan => maps:get(mpchan, Sess)
+   , dummy_witness => raw:dontknow()
    },
   raw:make_polyvar(Labeltag, {V, Cont}).
 
@@ -260,34 +262,49 @@ extract(_g, _role) -> raw:todo().
 )}.
 g() -> choice_at(fun alice/0, to_bob(fun hello_or_goodbye/0), {fun alice/0, '-->'(fun alice/0, fun bob/0)(fun hello/0, '-->'(fun bob/0, fun carol/0)(fun hello/0, '-->'(fun carol/0, fun alice/0)(fun hello/0, fun finish/0)))}, {fun alice/0, '-->'(fun alice/0, fun bob/0)(fun goodbye/0, '-->'(fun bob/0, fun carol/0)(fun goodbye/0, fun finish/0))}).
 
--spec a() -> ok.
-a() ->
-  Ch = extract(g(), fun alice/0),
-  Ch1 = send(Ch, fun
+-spec a(session({bob, out({goodbye, {integer(), session(ok)}}
+| {hello, {integer(), session({carol, inp({hello, {_, session(ok)}}
+ )}
+ )}}
+)}
+)) -> ok.
+a(Ch) ->
+  case true of
+    true -> Ch1 = send(Ch, fun
   (X) -> {bob, X}
 end, fun
   (X) -> {hello, X}
 end, 123),
-  begin
-    case receive(Ch1, fun
+case receive(Ch1, fun
   (X) -> {carol, X}
 end) of
-      {hello, {_v, Ch2}} -> close(Ch2)
-    end,
-    ok
+  {hello, {_v, Ch2}} -> close(Ch2)
+end;
+    false -> Ch1 = send(Ch, fun
+  (X) -> {bob, X}
+end, fun
+  (X) -> {goodbye, X}
+end, 123),
+close(Ch1)
   end.
 
--spec b() -> ok.
-b() ->
-  Ch = extract(g(), fun bob/0),
+-spec b(session({alice, inp({goodbye, {_, session({carol, out({goodbye, {binary(), session(ok)}}
+)}
+)}}
+| {hello, {integer(), session({carol, out({hello, {integer(), session(ok)}}
+ )}
+ )}}
+)}
+)) -> ok.
+b(Ch) ->
   Ch3 = case receive(Ch, fun
   (X) -> {alice, X}
 end) of
-    {hello, {_v, Ch2}} -> send(Ch2, fun
+    {hello, {V, Ch2}} -> send(Ch2, fun
   (X) -> {carol, X}
 end, fun
   (X) -> {hello, X}
-end, 123);
+end, erlang:'+'(V, 123));
     {goodbye, {_v, Ch2}} -> send(Ch2, fun
   (X) -> {carol, X}
 end, fun
@@ -296,9 +313,13 @@ end, <<"foo">>)
   end,
   close(Ch3).
 
--spec c() -> ok.
-c() ->
-  Ch = extract(g(), fun carol/0),
+-spec c(session({bob, inp({goodbye, {_, session(ok)}}
+| {hello, {_, session({alice, out({hello, {integer(), session(ok)}}
+ )}
+ )}}
+)}
+)) -> ok.
+c(Ch) ->
   Ch3 = case receive(Ch, fun
   (X) -> {bob, X}
 end) of
@@ -310,5 +331,39 @@ end, 123);
     {goodbye, {_v, Ch2}} -> Ch2
   end,
   close(Ch3).
+
+-spec from_some(option:t(A)) -> A.
+from_some(Opt) ->
+  case Opt of
+    {some, V} -> V;
+    none -> raw:fail()
+  end.
+
+-spec start(global(_, _, _), fun((session(_)) -> ok), fun((session(_)) -> ok), fun((session(_)) -> ok)) -> ok.
+start(_g, A, B, C) ->
+  Pid_a = process:make(fun
+  (_, Recv) ->
+  Ch_a = from_some(Recv(infinity)),
+  A(Ch_a)
+end),
+  Pid_b = process:make(fun
+  (_, Recv) ->
+  Ch_b = from_some(Recv(infinity)),
+  B(Ch_b)
+end),
+  Pid_c = process:make(fun
+  (_, Recv) ->
+  Ch_c = from_some(Recv(infinity)),
+  C(Ch_c)
+end),
+  Ch_a = raw:dontknow(),
+  Ch_b = raw:dontknow(),
+  Ch_c = raw:dontknow(),
+  begin
+    process:send(Pid_a, Ch_a),
+    process:send(Pid_b, Ch_b),
+    process:send(Pid_c, Ch_c),
+    ok
+  end.
 
 

@@ -17,7 +17,8 @@ assertfalse() -> throw(assertfalse).
 todo() -> todo.
 
 guarded_receive(Guard) ->
-    receive X when Guard(X) -> X.
+    receive 
+        X when Guard(X) -> X.
 
 make_polyvar(Tag, V) -> {Tag, V}.
 

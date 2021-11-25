@@ -18,7 +18,7 @@
 
 -type mpst_msg() :: {role_tag(), label_tag(), payload()}.
 
--type handle(Msg) :: #{ pid => erlang:pid() }.
+-type handle(Msg) :: erlang:pid().
 
 -type mpchan() :: #{ self => role_tag()
                    , channels => maps:t(role_tag(), handle(mpst_msg()))
@@ -27,7 +27,7 @@
 -spec raw_send(mpchan(), role_tag(), label_tag(), _) -> ok.
 raw_send(Mpchan, Role, Label, V) ->
   Ch = maps:get(Role, maps:get(channels, Mpchan), raw:dontknow()),
-  process:send(maps:get(pid, Ch), {maps:get(self, Mpchan), Label, payload_cast(V)}).
+  process:send(Ch, {maps:get(self, Mpchan), Label, payload_cast(V)}).
 
 -spec raw_receive(role_tag()) -> {label_tag(), _}.
 raw_receive(From) ->
